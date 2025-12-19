@@ -1,0 +1,26 @@
+{
+  "name": "home-train-service",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Eddy98/home-train-service.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/Eddy98/home-train-service/issues"
+  },
+  "homepage": "https://github.com/Eddy98/home-train-service#readme",
+  "dependencies": {
+    "axios": "^1.13.2",
+    "dotenv": "^17.2.3",
+    "express": "^4.22.1",
+    "gtfs-realtime-bindings": "^1.1.1"
+  }
+}
