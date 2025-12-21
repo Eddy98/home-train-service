@@ -29,7 +29,7 @@ async function fetchFeed(url) {
   }
 }
 
-function processFeed(feed, trains) {
+function processFeed(feed, trains, line) {
   if (!feed) return;
 
   feed.entity.forEach((entity) => {
@@ -44,10 +44,11 @@ function processFeed(feed, trains) {
             if (arrivalTime > currentTime) {
               trains.push({
                 routeId: entity.tripUpdate.trip.routeId,
-                direction: update.stopId.includes('N') ? 'Northbound' : 'Southbound',
+                direction: update.stopId.includes('N') ? 'UPTOWN' : 'DOWNTOWN',
                 arrivalTime: arrivalTime.toLocaleString(),
                 arrivalTimeRel: Math.round((arrivalTime - currentTime) / 60000) + ' mins',
-                stopId: update.stopId
+                stopId: update.stopId,
+                line
               });
             }
           }
@@ -65,8 +66,8 @@ app.get('/cathedral-parkway', async (req, res) => {
     ]);
 
     const trains = [];
-    processFeed(feedACE, trains);
-    processFeed(feedBDFM, trains);
+    processFeed(feedACE, trains, 'ACE');
+    processFeed(feedBDFM, trains, 'BDFM');
 
     // Sort by arrival time
     trains.sort((a, b) => {
@@ -135,7 +136,7 @@ function broadcast(text) {
   });
 }
 
-app.post('/broadcast-trains', async (req, res) => {
+app.post('/downtown', async (req, res) => {
   try {
     const [feedACE, feedBDFM] = await Promise.all([
       fetchFeed(MTA_API_URL_ACE),
@@ -143,8 +144,8 @@ app.post('/broadcast-trains', async (req, res) => {
     ]);
 
     const trains = [];
-    processFeed(feedACE, trains);
-    processFeed(feedBDFM, trains);
+    processFeed(feedACE, trains, 'ACE');
+    processFeed(feedBDFM, trains, 'BDFM');
 
     // Sort by arrival time
     trains.sort((a, b) => {
@@ -159,11 +160,59 @@ app.post('/broadcast-trains', async (req, res) => {
     }
 
     // Prepare message for the next 2-3 trains
-    const nextTrains = trains.slice(0, 3).map(t =>
+    const nextACETrains = trains.filter(t => t.direction === 'DOWNTOWN' && t.line === 'ACE').slice(0, 2).map(t =>
       `${t.direction} ${t.routeId} train in ${t.arrivalTimeRel}`
     ).join(', ');
 
-    const message = `Next trains at Cathedral Parkway: ${nextTrains}`;
+    const nextBDFMTrains = trains.filter(t => t.direction === 'DOWNTOWN' && t.line === 'BDFM').slice(0, 2).map(t =>
+      `${t.direction} ${t.routeId} train in ${t.arrivalTimeRel}`
+    ).join(', ');
+
+    const message = `Next downtown trains: ${nextACETrains} ${nextBDFMTrains.length > 0 ? 'and ' + nextBDFMTrains : ''}`;
+    console.log("Broadcasting:", message);
+    broadcast(message);
+
+    res.send("Broadcast triggered: " + message);
+
+  } catch (error) {
+    console.error('Error in broadcast-trains:', error);
+    res.status(500).send('Error triggering broadcast');
+  }
+});
+
+app.post('/uptown', async (req, res) => {
+  try {
+    const [feedACE, feedBDFM] = await Promise.all([
+      fetchFeed(MTA_API_URL_ACE),
+      fetchFeed(MTA_API_URL_BDFM)
+    ]);
+
+    const trains = [];
+    processFeed(feedACE, trains, 'ACE');
+    processFeed(feedBDFM, trains, 'BDFM');
+
+    // Sort by arrival time
+    trains.sort((a, b) => {
+      const timeA = parseInt(a.arrivalTimeRel);
+      const timeB = parseInt(b.arrivalTimeRel);
+      return timeA - timeB;
+    });
+
+    if (trains.length === 0) {
+      broadcast("No upcoming trains found for Cathedral Parkway.");
+      return res.send("No trains found.");
+    }
+
+    // Prepare message for the next 2-3 trains
+    const nextACETrains = trains.filter(t => t.direction === 'UPTOWN' && t.line === 'ACE').slice(0, 2).map(t =>
+      `${t.direction} ${t.routeId} train in ${t.arrivalTimeRel}`
+    ).join(', ');
+
+    const nextBDFMTrains = trains.filter(t => t.direction === 'UPTOWN' && t.line === 'BDFM').slice(0, 2).map(t =>
+      `${t.direction} ${t.routeId} train in ${t.arrivalTimeRel}`
+    ).join(', ');
+
+    const message = `Next uptown trains: ${nextACETrains} ${nextBDFMTrains.length > 0 ? 'and ' + nextBDFMTrains : ''}`;
     console.log("Broadcasting:", message);
     broadcast(message);
 
