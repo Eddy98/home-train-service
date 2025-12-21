@@ -1,6 +1,9 @@
 const express = require('express');
 const axios = require('axios');
 const GtfsRealtimeBindings = require('gtfs-realtime-bindings');
+const googleTTS = require('google-tts-api');
+const Client = require('castv2-client').Client;
+const DefaultMediaReceiver = require('castv2-client').DefaultMediaReceiver;
 require('dotenv').config();
 
 const app = express();
@@ -81,6 +84,94 @@ app.get('/cathedral-parkway', async (req, res) => {
   } catch (error) {
     console.error('Error fetching MTA data:', error);
     res.status(500).json({ error: 'Failed to fetch MTA data' });
+  }
+});
+
+function broadcast(text) {
+  const ip = process.env.GOOGLE_HOME_IP;
+  if (!ip) {
+    console.error('GOOGLE_HOME_IP not set');
+    return;
+  }
+
+  const url = googleTTS.getAudioUrl(text, {
+    lang: 'en',
+    slow: false,
+    host: 'https://translate.google.com',
+  });
+
+  const client = new Client();
+  console.log(`Connecting to Google Home at ${ip}...`);
+
+  client.connect(ip, function () {
+    console.log('Connected, launching media receiver...');
+    client.launch(DefaultMediaReceiver, function (err, player) {
+      if (err) {
+        console.error('Error launching media receiver:', err);
+        client.close();
+        return;
+      }
+
+      const media = {
+        contentId: url,
+        contentType: 'audio/mp3',
+        streamType: 'BUFFERED'
+      };
+
+      player.load(media, { autoplay: true }, function (err, status) {
+        if (err) {
+          console.error('Error loading media:', err);
+        } else {
+          console.log('Media loaded, playing announcement.');
+        }
+        client.close();
+      });
+    });
+  });
+
+  client.on('error', function (err) {
+    console.error('Error: %s', err.message);
+    client.close();
+  });
+}
+
+app.post('/broadcast-trains', async (req, res) => {
+  try {
+    const [feedACE, feedBDFM] = await Promise.all([
+      fetchFeed(MTA_API_URL_ACE),
+      fetchFeed(MTA_API_URL_BDFM)
+    ]);
+
+    const trains = [];
+    processFeed(feedACE, trains);
+    processFeed(feedBDFM, trains);
+
+    // Sort by arrival time
+    trains.sort((a, b) => {
+      const timeA = parseInt(a.arrivalTimeRel);
+      const timeB = parseInt(b.arrivalTimeRel);
+      return timeA - timeB;
+    });
+
+    if (trains.length === 0) {
+      broadcast("No upcoming trains found for Cathedral Parkway.");
+      return res.send("No trains found.");
+    }
+
+    // Prepare message for the next 2-3 trains
+    const nextTrains = trains.slice(0, 3).map(t =>
+      `${t.direction} ${t.routeId} train in ${t.arrivalTimeRel}`
+    ).join(', ');
+
+    const message = `Next trains at Cathedral Parkway: ${nextTrains}`;
+    console.log("Broadcasting:", message);
+    broadcast(message);
+
+    res.send("Broadcast triggered: " + message);
+
+  } catch (error) {
+    console.error('Error in broadcast-trains:', error);
+    res.status(500).send('Error triggering broadcast');
   }
 });
 
