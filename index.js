@@ -245,7 +245,8 @@ const downtownSwitch = new SinricProSwitch(deviceId);
 downtownSwitch.onPowerState(async (action, newPowerState) => {
   console.log('Sinric Pro: Power state for %s is %s', deviceId, newPowerState);
 
-  if (newPowerState === 'On') {
+  // SinricPro sometimes sends boolean true/false or string 'On'/'Off'
+  if (newPowerState === 'On' || newPowerState === true) {
     console.log('Triggering Downtown Broadcast via Sinric...');
     triggerDowntownBroadcast();
 
