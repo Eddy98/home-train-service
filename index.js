@@ -229,34 +229,49 @@ app.listen(port, () => {
 });
 
 // --- Sinric Pro Integration ---
-const { SinricPro, SinricProConstants } = require('sinricpro');
-const sinricPro = new SinricPro(process.env.SINRIC_APP_KEY, [process.env.SINRIC_DEVICE_ID_DOWNTOWN], process.env.SINRIC_APP_SECRET, true);
-const callbacks = {
-  setPowerState: async (deviceId, data) => {
-    console.log('Sinric Pro: Power state for %s is %s', deviceId, data);
-    if (deviceId === process.env.SINRIC_DEVICE_ID_DOWNTOWN && data === 'On') {
-      console.log('Triggering Downtown Broadcast via Sinric...');
+const { SinricPro, SinricProSwitch } = require('sinricpro');
 
-      // Reuse the existing logic by calling the endpoint function logic or refactoring.
-      // For simplicity, we'll self-invoke the endpoint locally or duplicate the logic trigger.
-      // Best way: separate the logic from the express route.
-      triggerDowntownBroadcast();
+const appKey = process.env.SINRIC_APP_KEY;
+const appSecret = process.env.SINRIC_APP_SECRET;
+const deviceId = process.env.SINRIC_DEVICE_ID_DOWNTOWN;
 
-      // Turn the switch back off after 2 seconds so it acts like a push button
-      setTimeout(() => {
-        sinricPro.raiseEvent(deviceId, SinricProConstants.eventNames.powerState, 'Off');
-        console.log('Sinric Pro: Auto-reset switch to Off');
-      }, 2000);
-    }
-    return true; // confirm success
+// Initialize SinricPro (empty constructor for v4 in this pattern)
+const sinricPro = new SinricPro();
+
+// Create the Switch Device
+const downtownSwitch = new SinricProSwitch(deviceId);
+
+// Register Callbacks
+downtownSwitch.onPowerState(async (action, newPowerState) => {
+  console.log('Sinric Pro: Power state for %s is %s', deviceId, newPowerState);
+
+  if (newPowerState === 'On') {
+    console.log('Triggering Downtown Broadcast via Sinric...');
+    triggerDowntownBroadcast();
+
+    // Reset switch to 'Off' (Push button behavior)
+    setTimeout(() => {
+      downtownSwitch.sendPowerStateEvent('Off');
+      console.log('Sinric Pro: Auto-reset switch to Off');
+    }, 2000);
   }
-};
+  return true;
+});
 
-sinricPro.registerCallbacks(callbacks);
+// Add device to client
+sinricPro.add(downtownSwitch);
+
+// Connect with Config
+sinricPro.begin({
+  appKey: appKey,
+  appSecret: appSecret,
+  deviceIds: [deviceId]
+});
 
 // Helper function refactored from the /downtown route
 async function triggerDowntownBroadcast() {
   try {
+    console.log("Fetching MTA data...");
     const [feedACE, feedBDFM] = await Promise.all([
       fetchFeed(MTA_API_URL_ACE),
       fetchFeed(MTA_API_URL_BDFM)
@@ -269,6 +284,7 @@ async function triggerDowntownBroadcast() {
     trains.sort((a, b) => parseInt(a.arrivalTimeRel) - parseInt(b.arrivalTimeRel));
 
     if (trains.length === 0) {
+      console.log("No trains found.");
       broadcast("No upcoming trains found for Cathedral Parkway.");
       return;
     }
