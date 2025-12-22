@@ -227,3 +227,65 @@ app.post('/uptown', async (req, res) => {
 app.listen(port, () => {
   console.log(`Server running on port ${port}`);
 });
+
+// --- Sinric Pro Integration ---
+const { SinricPro, SinricProConstants } = require('sinricpro');
+const sinricPro = new SinricPro(process.env.SINRIC_APP_KEY, [process.env.SINRIC_DEVICE_ID_DOWNTOWN], process.env.SINRIC_APP_SECRET, true);
+const callbacks = {
+  setPowerState: async (deviceId, data) => {
+    console.log('Sinric Pro: Power state for %s is %s', deviceId, data);
+    if (deviceId === process.env.SINRIC_DEVICE_ID_DOWNTOWN && data === 'On') {
+      console.log('Triggering Downtown Broadcast via Sinric...');
+
+      // Reuse the existing logic by calling the endpoint function logic or refactoring.
+      // For simplicity, we'll self-invoke the endpoint locally or duplicate the logic trigger.
+      // Best way: separate the logic from the express route.
+      triggerDowntownBroadcast();
+
+      // Turn the switch back off after 2 seconds so it acts like a push button
+      setTimeout(() => {
+        sinricPro.raiseEvent(deviceId, SinricProConstants.eventNames.powerState, 'Off');
+        console.log('Sinric Pro: Auto-reset switch to Off');
+      }, 2000);
+    }
+    return true; // confirm success
+  }
+};
+
+sinricPro.registerCallbacks(callbacks);
+
+// Helper function refactored from the /downtown route
+async function triggerDowntownBroadcast() {
+  try {
+    const [feedACE, feedBDFM] = await Promise.all([
+      fetchFeed(MTA_API_URL_ACE),
+      fetchFeed(MTA_API_URL_BDFM)
+    ]);
+
+    const trains = [];
+    processFeed(feedACE, trains, 'ACE');
+    processFeed(feedBDFM, trains, 'BDFM');
+
+    trains.sort((a, b) => parseInt(a.arrivalTimeRel) - parseInt(b.arrivalTimeRel));
+
+    if (trains.length === 0) {
+      broadcast("No upcoming trains found for Cathedral Parkway.");
+      return;
+    }
+
+    const nextACETrains = trains.filter(t => t.direction === 'DOWNTOWN' && t.line === 'ACE').slice(0, 2).map(t =>
+      `${t.direction} ${t.routeId} train in ${t.arrivalTimeRel}`
+    ).join(', ');
+
+    const nextBDFMTrains = trains.filter(t => t.direction === 'DOWNTOWN' && t.line === 'BDFM').slice(0, 2).map(t =>
+      `${t.direction} ${t.routeId} train in ${t.arrivalTimeRel}`
+    ).join(', ');
+
+    const message = `Next downtown trains: ${nextACETrains} ${nextBDFMTrains.length > 0 ? 'and ' + nextBDFMTrains : ''}`;
+    console.log("Broadcasting:", message);
+    broadcast(message);
+
+  } catch (error) {
+    console.error('Error in triggerDowntownBroadcast:', error);
+  }
+}

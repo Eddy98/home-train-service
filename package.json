@@ -24,6 +24,7 @@
     "dotenv": "^17.2.3",
     "express": "^4.22.1",
     "google-tts-api": "^2.0.2",
-    "gtfs-realtime-bindings": "^1.1.1"
+    "gtfs-realtime-bindings": "^1.1.1",
+    "sinricpro": "^4.0.0"
   }
 }
