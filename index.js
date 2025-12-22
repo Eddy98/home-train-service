@@ -233,46 +233,55 @@ const { SinricPro, SinricProSwitch } = require('sinricpro');
 
 const appKey = process.env.SINRIC_APP_KEY;
 const appSecret = process.env.SINRIC_APP_SECRET;
-const deviceId = process.env.SINRIC_DEVICE_ID_DOWNTOWN;
+const deviceIdDowntown = process.env.SINRIC_DEVICE_ID_DOWNTOWN;
+const deviceIdUptown = process.env.SINRIC_DEVICE_ID_UPTOWN;
 
-// Initialize SinricPro (empty constructor for v4 in this pattern)
+// Initialize SinricPro
 const sinricPro = new SinricPro();
 
-// Create the Switch Device
-const downtownSwitch = new SinricProSwitch(deviceId);
+// Helper to setup a switch
+function setupTrainSwitch(deviceId, direction) {
+  if (!deviceId) return;
 
-// Register Callbacks
-downtownSwitch.onPowerState(async (action, newPowerState) => {
-  console.log('Sinric Pro: Power state for %s is %s', deviceId, newPowerState);
+  const switchDevice = new SinricProSwitch(deviceId);
 
-  // SinricPro sometimes sends boolean true/false or string 'On'/'Off'
-  if (newPowerState === 'On' || newPowerState === true) {
-    console.log('Triggering Downtown Broadcast via Sinric...');
-    triggerDowntownBroadcast();
+  switchDevice.onPowerState(async (action, newPowerState) => {
+    console.log(`Sinric Pro: ${direction} Switch ${deviceId} state: ${newPowerState}`);
 
-    // Reset switch to 'Off' (Push button behavior)
-    setTimeout(() => {
-      downtownSwitch.sendPowerStateEvent('Off');
-      console.log('Sinric Pro: Auto-reset switch to Off');
-    }, 2000);
-  }
-  return true;
-});
+    // SinricPro sometimes sends boolean true/false or string 'On'/'Off'
+    if (newPowerState === 'On' || newPowerState === true) {
+      console.log(`Triggering ${direction} Broadcast via Sinric...`);
+      triggerTrainBroadcast(direction);
 
-// Add device to client
-sinricPro.add(downtownSwitch);
+      setTimeout(() => {
+        switchDevice.sendPowerStateEvent('Off');
+      }, 2000);
+    }
+    return true;
+  });
 
-// Connect with Config
+  sinricPro.add(switchDevice);
+}
+
+// Setup both switches
+setupTrainSwitch(deviceIdDowntown, 'DOWNTOWN');
+setupTrainSwitch(deviceIdUptown, 'UPTOWN');
+
+// Connect
+const deviceIds = [];
+if (deviceIdDowntown) deviceIds.push(deviceIdDowntown);
+if (deviceIdUptown) deviceIds.push(deviceIdUptown);
+
 sinricPro.begin({
   appKey: appKey,
   appSecret: appSecret,
-  deviceIds: [deviceId]
+  deviceIds: deviceIds
 });
 
-// Helper function refactored from the /downtown route
-async function triggerDowntownBroadcast() {
+// Generic Broadcast Function
+async function triggerTrainBroadcast(direction) {
   try {
-    console.log("Fetching MTA data...");
+    console.log(`Fetching MTA data for ${direction}...`);
     const [feedACE, feedBDFM] = await Promise.all([
       fetchFeed(MTA_API_URL_ACE),
       fetchFeed(MTA_API_URL_BDFM)
@@ -286,23 +295,29 @@ async function triggerDowntownBroadcast() {
 
     if (trains.length === 0) {
       console.log("No trains found.");
-      broadcast("No upcoming trains found for Cathedral Parkway.");
+      broadcast(`No upcoming ${direction.toLowerCase()} trains found for Cathedral Parkway.`);
       return;
     }
 
-    const nextACETrains = trains.filter(t => t.direction === 'DOWNTOWN' && t.line === 'ACE').slice(0, 2).map(t =>
+    // Filter by direction (UPTOWN vs DOWNTOWN)
+    const nextACETrains = trains.filter(t => t.direction === direction && t.line === 'ACE').slice(0, 2).map(t =>
       `${t.direction} ${t.routeId} train in ${t.arrivalTimeRel}`
     ).join(', ');
 
-    const nextBDFMTrains = trains.filter(t => t.direction === 'DOWNTOWN' && t.line === 'BDFM').slice(0, 2).map(t =>
+    const nextBDFMTrains = trains.filter(t => t.direction === direction && t.line === 'BDFM').slice(0, 2).map(t =>
       `${t.direction} ${t.routeId} train in ${t.arrivalTimeRel}`
     ).join(', ');
 
-    const message = `Next downtown trains: ${nextACETrains} ${nextBDFMTrains.length > 0 ? 'and ' + nextBDFMTrains : ''}`;
+    if (!nextACETrains && !nextBDFMTrains) {
+      broadcast(`No upcoming ${direction.toLowerCase()} trains found.`);
+      return;
+    }
+
+    const message = `Next ${direction.toLowerCase()} trains: ${nextACETrains} ${nextBDFMTrains.length > 0 ? 'and ' + nextBDFMTrains : ''}`;
     console.log("Broadcasting:", message);
     broadcast(message);
 
   } catch (error) {
-    console.error('Error in triggerDowntownBroadcast:', error);
+    console.error('Error in triggerTrainBroadcast:', error);
   }
 }
